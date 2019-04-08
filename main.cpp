@@ -47,19 +47,25 @@ class Cluster{
 
         Cluster(int id, int lvl):id(id), lvl(lvl){};
 
+        /* number of external 
+        pin connections in the net */
         int get_deg(const vector<vector<int>> &nets) const{
             int deg = 0;
 
-            vector<int> ids;
+            // id of the blocks
+            vector<int> ids; 
             for(auto block:blocks)ids.push_back(block->id);
             
             for(auto pins:nets)
                 for(auto pin:pins)
-                    if(find(ids.begin(), ids.end(), pin)!=ids.end())
-                        deg++;
+                    // if pin is not of any block in the cluster 
+                    if(find(ids.begin(), ids.end(), pin)!=ids.end()) 
+                        deg++; // external connection
             return deg;
         }
 
+        /* returns average affinity 
+        of each blocks in clusters */
         float affinity_to(Cluster &cluster, vector<vector<float>> &affinity_table){
             float sum=0, count=0;
 
@@ -98,7 +104,7 @@ FC_Clustering(
     // for(auto d:desc_clusters) cout<<d<<" ";cout<<endl;
 
     // // push clusters
-    for(auto id:desc_clusters){
+    for(unsigned int id:desc_clusters){
         if(!visited[id]){
             // new empty cluster
             H_lvl_.push_back(Cluster(H_lvl_.size(), lvl+1));
@@ -108,8 +114,6 @@ FC_Clustering(
 
             while(cur_cluster!=NULL && !visited[cur_cluster->id]){
                 visited[cur_cluster->id] = true;
-                for(auto b:visited)cout<<b<<" ";cout<<endl;
-                cout<<cur_cluster->id<<" >> ";
 
                 // add current blocks
                 for(auto block:cur_cluster->blocks)
@@ -117,35 +121,20 @@ FC_Clustering(
 
                 // find next most affinity cluster
                 float max_aff=-1;
-                int next_cluster_id = -1;
+                Cluster * next_cluster = NULL;
 
-                cout<<"Check(";
-                for(auto tmp_cluster:H_lvl){
-                    cout<<tmp_cluster.id;
+                for(auto &tmp_cluster:H_lvl){
                     if(&tmp_cluster != cur_cluster){
                         float tmp_aff = cur_cluster->affinity_to(tmp_cluster, affinity_table);
-                        cout<<"["<<fixed<<setprecision(2)<<tmp_aff;
+                        // update if greater affinity found
                         if(tmp_aff > max_aff){
-                            cout<<"*";
                             max_aff = tmp_aff;
-                            next_cluster_id = tmp_cluster.id;
+                            next_cluster = &tmp_cluster;
                         }
-                        cout<<", "<<max_aff<<"]";
                     }
-                    if(next_cluster_id!=-1)
-                        cout << next_cluster_id<<"";
-                    cout<<", ";
                 }
-                cout<<")";
-
-                // if(cur_cluster == next_cluster){
-                //     cout<<"Repeat"<<endl;
-                //     break;
-                // }
-                cur_cluster = &H_lvl[next_cluster_id];
+                cur_cluster = next_cluster;
             }
-
-            cout<<endl;
         }
     }
     return H_lvl_;
@@ -227,8 +216,8 @@ print_values(
     }
 
     cout<<"\nAffinities\n";
-    for(int i=0;i<blocks.size();i++){
-        for(int j=0;j<blocks.size();j++){
+    for(unsigned int i=0;i<blocks.size();i++){
+        for(unsigned int j=0;j<blocks.size();j++){
             cout<<fixed<<setprecision(2)<<affinity[i][j]<<" ";
         }
         cout<<endl;
@@ -268,7 +257,7 @@ class RDAP{
         }
 
         void connect(vector<int> ids){
-            for(auto id:ids)if(id>blocks.size())return;
+            for(unsigned int id:ids)if(id>blocks.size())return;
             nets.push_back(ids);
         }
 
@@ -376,7 +365,7 @@ class RDAP{
             vector<int> ids = hrchy_grouping(HGs, n_hgs, tree); // hierarchy based 
 
             // set remaining HGs
-            for(auto id:ids) if(HGs[id]==-1)HGs[id] = n_hgs++;
+            for(unsigned int id:ids) if(HGs[id]==-1)HGs[id] = n_hgs++;
             ids.clear();
             vector<int>().swap(ids);
 
@@ -384,24 +373,21 @@ class RDAP{
         }
 
         /* max_n_coarse: maximum no. of clusters in coarsest lvl */
-        vector<vector<Cluster>> get_clusters(vector<vector<float>> &affinity, int max_n_coarse){
+        vector<vector<Cluster>> get_clusters(vector<vector<float>> &affinity, unsigned int max_n_coarse){
             vector<vector<Cluster>> H_lvls;
 
             /* finest lvl of clusters */
             H_lvls.push_back(vector<Cluster>()); 
-            for(int i=0;i<blocks.size();i++){
+            for(unsigned int i=0;i<blocks.size();i++){
                 H_lvls[0].push_back(Cluster(i, 0)); // add new cluster
                 H_lvls[0][i].blocks.push_back(blocks[i]); // add block
             }
 
             /* multi lvl clusters */
             int lvl = 0;
-            while(H_lvls[H_lvls.size()-1].size() > max_n_coarse){
+            while(H_lvls[H_lvls.size()-1].size() >= max_n_coarse){
                 lvl++;
-                
-                vector<Cluster> H_lvl_ = FC_Clustering(H_lvls[lvl-1], lvl, nets, affinity);
-                H_lvls.push_back(H_lvl_);
-                break;
+                H_lvls.push_back( FC_Clustering(H_lvls[lvl-1], lvl, nets, affinity) );
             }
 
             return H_lvls;
