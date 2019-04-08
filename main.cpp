@@ -30,6 +30,128 @@ typedef struct Block{
     id(-1){};
 }Block;
 
+
+int sq(int a){
+    return a*a;
+}
+
+int distance(Block* a, Block* b){
+    return sq(a->x - b->x) + sq(a->y - b->y); 
+}
+
+class Cluster{
+    public:
+        int id;
+        int lvl;
+        vector<Block*> blocks; // sub clusters
+
+        Cluster(int id, int lvl):id(id), lvl(lvl){};
+
+        int get_deg(const vector<vector<int>> &nets) const{
+            int deg = 0;
+
+            vector<int> ids;
+            for(auto block:blocks)ids.push_back(block->id);
+            
+            for(auto pins:nets)
+                for(auto pin:pins)
+                    if(find(ids.begin(), ids.end(), pin)!=ids.end())
+                        deg++;
+            return deg;
+        }
+
+        float affinity_to(Cluster &cluster, vector<vector<float>> &affinity_table){
+            float sum=0, count=0;
+
+            for(auto block:blocks){
+                for(auto block_:cluster.blocks){
+                    sum += affinity_table[block->id][block_->id];
+                    count++;
+                }
+            }
+
+            return sum/count;
+        }
+};
+
+
+vector<Cluster> 
+FC_Clustering(
+    vector<Cluster> &H_lvl, 
+    int lvl, 
+    vector<vector<int>> &nets, 
+    vector<vector<float>> &affinity_table
+){
+    vector<Cluster> H_lvl_; // new level
+    vector<bool> visited(H_lvl.size(), false);
+
+
+    // for(auto a:H_lvl) cout<<a.id<<"->"<<a.get_deg(nets)<<" ";cout<<endl;
+
+    // descending order of blocks by degree
+    vector<int>  desc_clusters(H_lvl.size());
+    iota(desc_clusters.begin(), desc_clusters.end(), 0);
+    sort(desc_clusters.begin(), desc_clusters.end(), [nets, H_lvl](int i, int j){
+        return H_lvl[i].get_deg(nets) > H_lvl[j].get_deg(nets); // greater means swap
+    });
+
+    // for(auto d:desc_clusters) cout<<d<<" ";cout<<endl;
+
+    // // push clusters
+    for(auto id:desc_clusters){
+        if(!visited[id]){
+            // new empty cluster
+            H_lvl_.push_back(Cluster(H_lvl_.size(), lvl+1));
+
+            Cluster *coarser_cluster = &H_lvl_[H_lvl_.size()-1];
+            Cluster *cur_cluster = &H_lvl[id];
+
+            while(cur_cluster!=NULL && !visited[cur_cluster->id]){
+                visited[cur_cluster->id] = true;
+                for(auto b:visited)cout<<b<<" ";cout<<endl;
+                cout<<cur_cluster->id<<" >> ";
+
+                // add current blocks
+                for(auto block:cur_cluster->blocks)
+                    coarser_cluster->blocks.push_back(block);
+
+                // find next most affinity cluster
+                float max_aff=-1;
+                int next_cluster_id = -1;
+
+                cout<<"Check(";
+                for(auto tmp_cluster:H_lvl){
+                    cout<<tmp_cluster.id;
+                    if(&tmp_cluster != cur_cluster){
+                        float tmp_aff = cur_cluster->affinity_to(tmp_cluster, affinity_table);
+                        cout<<"["<<fixed<<setprecision(2)<<tmp_aff;
+                        if(tmp_aff > max_aff){
+                            cout<<"*";
+                            max_aff = tmp_aff;
+                            next_cluster_id = tmp_cluster.id;
+                        }
+                        cout<<", "<<max_aff<<"]";
+                    }
+                    if(next_cluster_id!=-1)
+                        cout << next_cluster_id<<"";
+                    cout<<", ";
+                }
+                cout<<")";
+
+                // if(cur_cluster == next_cluster){
+                //     cout<<"Repeat"<<endl;
+                //     break;
+                // }
+                cur_cluster = &H_lvl[next_cluster_id];
+            }
+
+            cout<<endl;
+        }
+    }
+    return H_lvl_;
+}
+
+
 class Node{
     public:
     Block* block = NULL;
@@ -79,14 +201,51 @@ class Node{
 };
 
 
-int sq(int a){
-    return a*a;
-}
+void 
+print_values(
+    vector<int> HGs, 
+    Node* tree, 
+    vector<Block*> &blocks,
+    vector<vector<float>> &affinity, 
+    vector<Block*> macro_blocks,
+    vector<vector<Cluster>> H_lvls
+){
+    cout<<"HGs: ";for(auto hg:HGs)cout<<hg<<" ";cout<<endl; 
 
-int distance(Block* a, Block* b){
-    return sq(a->x - b->x) + sq(a->y - b->y); 
-}
+    cout<<"\nMacro Block Distances\n";
+    for(auto a:macro_blocks){
+        for(auto b:macro_blocks)
+            cout<<distance(a, b)<<"\t";
+        cout<<endl;
+    }
+            
+    cout<<"\nLCA Heights\n";
+    for(auto a:blocks){
+        for(auto b:blocks)
+            cout<<tree->lca_h(*a, *b)<<"\t";
+        cout<<endl;
+    }
 
+    cout<<"\nAffinities\n";
+    for(int i=0;i<blocks.size();i++){
+        for(int j=0;j<blocks.size();j++){
+            cout<<fixed<<setprecision(2)<<affinity[i][j]<<" ";
+        }
+        cout<<endl;
+    }
+
+    cout<<"\nClusters by Levels\n";
+    for(auto H_lvl:H_lvls){
+        for(auto cluster:H_lvl){
+            cout<<"( ";
+            for(auto block:cluster.blocks){
+                cout<<block->id<<", ";
+            }
+            cout<<"), ";
+        }
+        cout<<endl;
+    }
+}
 /* Routability driven analytical placement */
 class RDAP{
     public:
@@ -224,41 +383,46 @@ class RDAP{
             return HGs;
         }
 
-        void place(){
-            /* DESIGN HIERARCHY IDENTIFICATION */
-            vector<int> HGs = get_HGs();
-            float affinity[blocks.size()][blocks.size()];
+        /* max_n_coarse: maximum no. of clusters in coarsest lvl */
+        vector<vector<Cluster>> get_clusters(vector<vector<float>> &affinity, int max_n_coarse){
+            vector<vector<Cluster>> H_lvls;
 
-            cout<<"HGs: ";for(auto hg:HGs)cout<<hg<<" ";cout<<endl;        
-            
-            cout<<"\nMacro Block Distances\n";
-            for(auto a:macro_blocks){
-                for(auto b:macro_blocks)
-                    cout<<distance(a, b)<<"\t";
-                cout<<endl;
-            }
-            
-            cout<<"\nLCA Heights\n";
-            for(auto a:blocks){
-                for(auto b:blocks)
-                    cout<<tree->lca_h(*a, *b)<<"\t";
-                cout<<endl;
-            }
-
-            for(auto a:blocks){
-                for(auto b:blocks)
-                    affinity[a->id][b->id] = get_affinity(HGs, *a, *b);
-            }
-
-            cout<<"\nAffinities\n";
+            /* finest lvl of clusters */
+            H_lvls.push_back(vector<Cluster>()); 
             for(int i=0;i<blocks.size();i++){
-                for(int j=0;j<blocks.size();j++){
-                    cout<<fixed<<setprecision(2)<<affinity[i][j]<<" ";
-                }
-                cout<<endl;
+                H_lvls[0].push_back(Cluster(i, 0)); // add new cluster
+                H_lvls[0][i].blocks.push_back(blocks[i]); // add block
             }
+
+            /* multi lvl clusters */
+            int lvl = 0;
+            while(H_lvls[H_lvls.size()-1].size() > max_n_coarse){
+                lvl++;
+                
+                vector<Cluster> H_lvl_ = FC_Clustering(H_lvls[lvl-1], lvl, nets, affinity);
+                H_lvls.push_back(H_lvl_);
+                break;
+            }
+
+            return H_lvls;
+        }
+
+        void place(int max_n_coarse = 4){
+            /* DESIGN HIERARCHY IDENTIFICATION */
+            vector<int> HGs = get_HGs(); // hierarchy groups
+            // affinity for each block pair
+            vector<vector<float>> affinity( blocks.size(), vector<float> ( blocks.size() ) ); 
+            for(auto a:blocks) 
+                for(auto b:blocks) 
+                    affinity[a->id][b->id] = get_affinity(HGs, *a, *b); 
+
+            /* COARSENING */
+            vector<vector<Cluster>> H_lvls = get_clusters(affinity, max_n_coarse);
+
+            print_values(HGs, tree, blocks, affinity, macro_blocks, H_lvls);
         }
 };
+
 
 
 int main(){
