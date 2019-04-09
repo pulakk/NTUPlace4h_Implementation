@@ -2,4 +2,4 @@
 
 RUN : g++ main.cpp
 
-REQUIREMENTS (Recommended) : g++14
+GCC Version Used : 8.2.0
