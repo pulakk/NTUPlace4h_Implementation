@@ -41,6 +41,9 @@ int distance(Block* a, Block* b){
 
 class Cluster{
     public:
+        static vector<vector<int>> nets;
+        static vector<vector<float>> affinity_table;
+
         int id;
         int lvl;
         vector<Block*> blocks; // sub clusters
@@ -49,7 +52,7 @@ class Cluster{
 
         /* number of external 
         pin connections in the net */
-        int get_deg(const vector<vector<int>> &nets) const{
+        int get_deg() const{
             int deg = 0;
 
             // id of the blocks
@@ -66,7 +69,7 @@ class Cluster{
 
         /* returns average affinity 
         of each blocks in clusters */
-        float affinity_to(Cluster &cluster, vector<vector<float>> &affinity_table){
+        float affinity_to(Cluster &cluster){
             float sum=0, count=0;
 
             for(auto block:blocks){
@@ -80,38 +83,32 @@ class Cluster{
         }
 };
 
+// initialize static variables
+vector<vector<int>> Cluster::nets; 
+vector<vector<float>> Cluster::affinity_table; 
 
-vector<Cluster> 
-FC_Clustering(
-    vector<Cluster> &H_lvl, 
-    int lvl, 
-    vector<vector<int>> &nets, 
-    vector<vector<float>> &affinity_table
-){
+/* First choice clustering */
+vector<Cluster> FC_Clustering(vector<Cluster> &H_lvl, int lvl){
     vector<Cluster> H_lvl_; // new level
     vector<bool> visited(H_lvl.size(), false);
 
-
-    // for(auto a:H_lvl) cout<<a.id<<"->"<<a.get_deg(nets)<<" ";cout<<endl;
-
-    // descending order of blocks by degree
+    // descending order of clusters by degree
     vector<int>  desc_clusters(H_lvl.size());
     iota(desc_clusters.begin(), desc_clusters.end(), 0);
-    sort(desc_clusters.begin(), desc_clusters.end(), [nets, H_lvl](int i, int j){
-        return H_lvl[i].get_deg(nets) > H_lvl[j].get_deg(nets); // greater means swap
+    sort(desc_clusters.begin(), desc_clusters.end(), [H_lvl](int i, int j){
+        return H_lvl[i].get_deg() > H_lvl[j].get_deg(); // greater means swap
     });
 
-    // for(auto d:desc_clusters) cout<<d<<" ";cout<<endl;
-
-    // // push clusters
+    // generate upper lvl clusters
     for(unsigned int id:desc_clusters){
         if(!visited[id]){
             // new empty cluster
             H_lvl_.push_back(Cluster(H_lvl_.size(), lvl+1));
 
-            Cluster *coarser_cluster = &H_lvl_[H_lvl_.size()-1];
-            Cluster *cur_cluster = &H_lvl[id];
+            Cluster *coarser_cluster = &H_lvl_[H_lvl_.size()-1]; // cluster for the new lvl
+            Cluster *cur_cluster = &H_lvl[id]; // cluster of the old lvl
 
+            /* gather clusters using FC */
             while(cur_cluster!=NULL && !visited[cur_cluster->id]){
                 visited[cur_cluster->id] = true;
 
@@ -119,13 +116,13 @@ FC_Clustering(
                 for(auto block:cur_cluster->blocks)
                     coarser_cluster->blocks.push_back(block);
 
-                // find next most affinity cluster
                 float max_aff=-1;
                 Cluster * next_cluster = NULL;
 
+                // find max affinity cluster
                 for(auto &tmp_cluster:H_lvl){
                     if(&tmp_cluster != cur_cluster){
-                        float tmp_aff = cur_cluster->affinity_to(tmp_cluster, affinity_table);
+                        float tmp_aff = cur_cluster->affinity_to(tmp_cluster);
                         // update if greater affinity found
                         if(tmp_aff > max_aff){
                             max_aff = tmp_aff;
@@ -290,18 +287,16 @@ class RDAP{
         }
 
     /* Hierarchy Group Functions */  
-        /* Match macros
-        that have same dimensions*/
+        /* Match macros that 
+        have same dimensions */
         void dim_HG_grouping(vector<int> &HGs, int &n_hgs, int max_dst = 10){
-            /* assigning HGs
-             to macros */
             for(unsigned int i=0;i<macro_blocks.size();i++){
                 if(HGs[i]==-1) HGs[i] = n_hgs++; // assign new group id
 
                 for(unsigned int j=i+1;j<macro_blocks.size();j++){
-                    if(blocks[i]->h == blocks[j]->h
-                    && blocks[i]->w == blocks[j]->w
-                    && distance(blocks[i], blocks[j]) < max_dst){
+                    if(blocks[i]->h == blocks[j]->h // same height
+                    && blocks[i]->w == blocks[j]->w // same width
+                    && distance(blocks[i], blocks[j]) < max_dst){ // small distance
                         HGs[j] = HGs[i]; // set same group id
                     }
                 }
@@ -329,11 +324,11 @@ class RDAP{
             /* find an already 
             assigned macro group 
             in the list of ids */
-            int macro_group = -1;
-            int macro_id;
+            int macro_group = -1; // HG group id of the macro
+            int macro_id; // id of the macro block
             for(unsigned int i=0;i<ids.size();i++)
                 if(blocks[ids[i]]->is_macro){
-                    if(HGs[ids[i]]!=-1){
+                    if(HGs[ids[i]]!=-1){ // already assigned
                         macro_group = HGs[ids[i]];
                         macro_id = ids[i];
                     }
@@ -345,8 +340,9 @@ class RDAP{
                 id to all the other blocks 
                 in the list of ids */
                 for(unsigned int i=0;i<ids.size();i++)
-                    if(!blocks[ids[i]]->is_macro || HGs[ids[i]]==-1)
+                    if(HGs[ids[i]]==-1)
                         HGs[ids[i]] = macro_group;
+
                 vector<int>().swap(ids); // clear memory
                 ids.push_back(macro_id);
             }
@@ -366,14 +362,15 @@ class RDAP{
 
             // set remaining HGs
             for(unsigned int id:ids) if(HGs[id]==-1)HGs[id] = n_hgs++;
+
             ids.clear();
-            vector<int>().swap(ids);
+            vector<int>().swap(ids); // clear memory
 
             return HGs;
         }
 
         /* max_n_coarse: maximum no. of clusters in coarsest lvl */
-        vector<vector<Cluster>> get_clusters(vector<vector<float>> &affinity, unsigned int max_n_coarse){
+        vector<vector<Cluster>> get_clusters(unsigned int max_n_coarse){
             vector<vector<Cluster>> H_lvls;
 
             /* finest lvl of clusters */
@@ -387,7 +384,13 @@ class RDAP{
             int lvl = 0;
             while(H_lvls[H_lvls.size()-1].size() >= max_n_coarse){
                 lvl++;
-                H_lvls.push_back( FC_Clustering(H_lvls[lvl-1], lvl, nets, affinity) );
+                vector<Cluster> H_lvl_ = FC_Clustering( H_lvls[lvl-1], lvl );
+
+                // if no change then break
+                if(H_lvl_.size() == H_lvls[lvl-1].size()) break;
+
+                // push new level of clusters
+                H_lvls.push_back( H_lvl_ );
             }
 
             return H_lvls;
@@ -397,15 +400,21 @@ class RDAP{
             /* DESIGN HIERARCHY IDENTIFICATION */
             vector<int> HGs = get_HGs(); // hierarchy groups
             // affinity for each block pair
-            vector<vector<float>> affinity( blocks.size(), vector<float> ( blocks.size() ) ); 
+            vector<vector<float>> affinity_table( blocks.size(), vector<float> ( blocks.size() ) ); 
             for(auto a:blocks) 
                 for(auto b:blocks) 
-                    affinity[a->id][b->id] = get_affinity(HGs, *a, *b); 
+                    affinity_table[a->id][b->id] = get_affinity(HGs, *a, *b); 
 
             /* COARSENING */
-            vector<vector<Cluster>> H_lvls = get_clusters(affinity, max_n_coarse);
+            Cluster::nets = nets;
+            Cluster::affinity_table = affinity_table;
+            vector<vector<Cluster>> H_lvls = get_clusters(max_n_coarse);
 
-            print_values(HGs, tree, blocks, affinity, macro_blocks, H_lvls);
+            /* DECOARSENING */
+            
+
+            /* Printing calculated values */
+            print_values(HGs, tree, blocks, affinity_table, macro_blocks, H_lvls);
         }
 };
 
