@@ -1,6 +1,8 @@
 #include <iostream>
 #include <string>
 #include <bits/stdc++.h>
+#include <stdlib.h>  
+#include <cmath>
 using namespace std;
 
 typedef struct Block{
@@ -36,7 +38,7 @@ int sq(int a){
 }
 
 int distance(Block* a, Block* b){
-    return sq(a->x - b->x) + sq(a->y - b->y); 
+    return sqrt(sq(a->x - b->x) + sq(a->y - b->y)); 
 }
 
 class Cluster{
@@ -46,6 +48,8 @@ class Cluster{
 
         int id;
         int lvl;
+        int x=-1;
+        int y=-1;
         vector<Block*> blocks; // sub clusters
 
         Cluster(int id, int lvl):id(id), lvl(lvl){};
@@ -135,6 +139,17 @@ vector<Cluster> FC_Clustering(vector<Cluster> &H_lvl, int lvl){
         }
     }
     return H_lvl_;
+}
+
+/* randomly places blocks for now
+    ( assumes that there is enough space
+    to put all the blocks )
+*/
+void Quadratic_Placement(vector<Cluster> &clusters, int H, int W){
+    for(auto &cluster:clusters){
+        cluster.x = rand() % (W);
+        cluster.y = rand() % (H);
+    }
 }
 
 
@@ -232,6 +247,7 @@ print_values(
         cout<<endl;
     }
 }
+
 /* Routability driven analytical placement */
 class RDAP{
     public:
@@ -241,6 +257,8 @@ class RDAP{
         int n_hgs;
         Node* tree = NULL;
         vector<vector<int>> nets;
+        int board_h=20, board_w=20; // height and width of board
+        const int BLOCK_DST_THRESHOLD = 10;
 
     /* blocks, nets and nodes */   
         void add_block(Block &block){
@@ -289,14 +307,14 @@ class RDAP{
     /* Hierarchy Group Functions */  
         /* Match macros that 
         have same dimensions */
-        void dim_HG_grouping(vector<int> &HGs, int &n_hgs, int max_dst = 10){
+        void dim_HG_grouping(vector<int> &HGs, int &n_hgs){
             for(unsigned int i=0;i<macro_blocks.size();i++){
                 if(HGs[i]==-1) HGs[i] = n_hgs++; // assign new group id
 
                 for(unsigned int j=i+1;j<macro_blocks.size();j++){
                     if(blocks[i]->h == blocks[j]->h // same height
                     && blocks[i]->w == blocks[j]->w // same width
-                    && distance(blocks[i], blocks[j]) < max_dst){ // small distance
+                    && distance(blocks[i], blocks[j]) < BLOCK_DST_THRESHOLD){ // small distance
                         HGs[j] = HGs[i]; // set same group id
                     }
                 }
@@ -375,12 +393,13 @@ class RDAP{
 
             /* finest lvl of clusters */
             H_lvls.push_back(vector<Cluster>()); 
-            for(unsigned int i=0;i<blocks.size();i++){
-                H_lvls[0].push_back(Cluster(i, 0)); // add new cluster
-                H_lvls[0][i].blocks.push_back(blocks[i]); // add block
+            for(unsigned int i=macro_blocks.size();i<blocks.size();i++){
+                int cluster_id = i - macro_blocks.size();
+                H_lvls[0].push_back(Cluster(cluster_id, 0)); // add new cluster
+                H_lvls[0][cluster_id].blocks.push_back(blocks[i]); // add block
             }
 
-            /* multi lvl clusters */
+            /* generate coarser lvl clusters */
             int lvl = 0;
             while(H_lvls[H_lvls.size()-1].size() >= max_n_coarse){
                 lvl++;
@@ -396,7 +415,7 @@ class RDAP{
             return H_lvls;
         }
 
-        void place(int max_n_coarse = 4){
+        void place(unsigned int max_n_coarse = 3){
             /* DESIGN HIERARCHY IDENTIFICATION */
             vector<int> HGs = get_HGs(); // hierarchy groups
             // affinity for each block pair
@@ -411,7 +430,15 @@ class RDAP{
             vector<vector<Cluster>> H_lvls = get_clusters(max_n_coarse);
 
             /* DECOARSENING */
-            
+            int lvls = H_lvls.size();
+            Quadratic_Placement(H_lvls[lvls-1], board_h, board_w);
+
+            // for(int lvl=lvls-1;lvl>=0;lvl--){
+            //     float lambda = gradient();
+            //     while(overflow_same()){
+            //         solve();
+            //     }
+            // }
 
             /* Printing calculated values */
             print_values(HGs, tree, blocks, affinity_table, macro_blocks, H_lvls);
@@ -423,8 +450,8 @@ class RDAP{
 int main(){
     // blocks
     Block A(0,0,2,1);
-    Block B(2,0,2,1);
-    Block C(2,3,2,2);
+    Block B(9,0,2,1);
+    Block C(16,16,2,2);
     Block a(1,1);
     Block b(1,1);
     Block c(1,2);
