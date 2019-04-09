@@ -65,8 +65,8 @@ class Cluster{
             
             for(auto pins:nets)
                 for(auto pin:pins)
-                    // if pin is not of any block in the cluster 
-                    if(find(ids.begin(), ids.end(), pin)!=ids.end()) 
+                    // if pin isn't one among blocks of this cluster
+                    if(find(ids.begin(), ids.end(), pin)==ids.end()) // could not find
                         deg++; // external connection
             return deg;
         }
